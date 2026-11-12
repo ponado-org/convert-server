@@ -1,4 +1,4 @@
-package render
+package typst
 
 import (
 	"os"
@@ -47,7 +47,7 @@ func newTestRenderer(t *testing.T, script string) *Renderer {
 }
 
 func TestNewRejectsMissingBinary(t *testing.T) {
-	if _, err := New("typst-server-definitely-missing", 0); err == nil {
+	if _, err := New("convert-server-definitely-missing", 0); err == nil {
 		t.Fatal("expected an error for a missing typst binary")
 	}
 }

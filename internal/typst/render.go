@@ -1,7 +1,7 @@
-// Package render compiles Typst templates to PDF by shelling out to the
+// Package typst compiles Typst templates to PDF by shelling out to the
 // prebuilt typst CLI. It owns per-request shadow dirs, client-path clamping,
 // timeouts and the compile-concurrency cap. No HTTP awareness lives here.
-package render
+package typst
 
 import (
 	"context"
@@ -103,7 +103,7 @@ func (r *Renderer) Render(req Request) ([]byte, error) {
 	}
 	defer r.release()
 
-	dir, err := os.MkdirTemp("", "typst-server-")
+	dir, err := os.MkdirTemp("", "convert-server-")
 	if err != nil {
 		return nil, fmt.Errorf("temp dir: %w", err)
 	}

@@ -6,4 +6,4 @@ pnpm-lock.yaml
 fonts
 compose.*.yml
 README.md
-main_test.go
+**/*_test.go

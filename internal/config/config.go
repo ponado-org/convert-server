@@ -1,4 +1,4 @@
-// Package config loads typst-server settings from the environment.
+// Package config loads convert-server settings from the environment.
 package config
 
 import (
@@ -11,19 +11,26 @@ import (
 
 const (
 	defaultPort   = "3100"
-	defaultBodyMB = 25
+	defaultBodyMB = 50
 )
 
 // Config is the fully resolved service configuration.
 type Config struct {
 	// Port is the TCP port to listen on (PORT, default 3100).
 	Port string
-	// TypstBin is the typst binary name or path (TYPST_BIN, default "typst").
+	// TypstBin is the typst binary name or path (CONVERT_TYPST_BIN,
+	// default "typst").
 	TypstBin string
-	// MaxConcurrency caps parallel compiles; <= 0 means unlimited
-	// (MAX_CONCURRENCY, default NumCPU).
+	// VipsBin is the libvips CLI name or path (CONVERT_VIPS_BIN,
+	// default "vips").
+	VipsBin string
+	// GotenbergURL enables Office/text conversions when set
+	// (CONVERT_GOTENBERG_URL, e.g. http://gotenberg:3000).
+	GotenbergURL string
+	// MaxConcurrency caps parallel conversions; <= 0 means unlimited
+	// (CONVERT_MAX_CONCURRENCY, default NumCPU).
 	MaxConcurrency int
-	// MaxBodyBytes caps request bodies (MAX_BODY_MB, default 25MB).
+	// MaxBodyBytes caps request bodies (CONVERT_MAX_BODY_MB, default 50MB).
 	MaxBodyBytes int64
 }
 
@@ -33,29 +40,36 @@ func FromEnv() (Config, error) {
 	cfg := Config{
 		Port:           defaultPort,
 		TypstBin:       "typst",
+		VipsBin:        "vips",
 		MaxConcurrency: runtime.NumCPU(),
 		MaxBodyBytes:   defaultBodyMB << 20,
 	}
 
-	if v := os.Getenv("PORT"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("PORT")); v != "" {
 		cfg.Port = v
 	}
-	if v := os.Getenv("TYPST_BIN"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("CONVERT_TYPST_BIN")); v != "" {
 		cfg.TypstBin = v
 	}
+	if v := strings.TrimSpace(os.Getenv("CONVERT_VIPS_BIN")); v != "" {
+		cfg.VipsBin = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CONVERT_GOTENBERG_URL")); v != "" {
+		cfg.GotenbergURL = v
+	}
 
-	if v := strings.TrimSpace(os.Getenv("MAX_CONCURRENCY")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("CONVERT_MAX_CONCURRENCY")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return Config{}, fmt.Errorf("invalid MAX_CONCURRENCY %q: %w", v, err)
+			return Config{}, fmt.Errorf("invalid CONVERT_MAX_CONCURRENCY %q: %w", v, err)
 		}
 		cfg.MaxConcurrency = n
 	}
 
-	if v := strings.TrimSpace(os.Getenv("MAX_BODY_MB")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("CONVERT_MAX_BODY_MB")); v != "" {
 		mb, err := strconv.Atoi(v)
 		if err != nil || mb <= 0 {
-			return Config{}, fmt.Errorf("invalid MAX_BODY_MB %q: want a positive integer", v)
+			return Config{}, fmt.Errorf("invalid CONVERT_MAX_BODY_MB %q: want a positive integer", v)
 		}
 		cfg.MaxBodyBytes = int64(mb) << 20
 	}

@@ -1,14 +1,20 @@
 {
-	"name": "typst-server",
-	"version": "0.1.3",
+	"name": "convert-server",
+	"version": "0.2.0",
 	"private": true,
 	"packageManager": "pnpm@12.15.0",
 	"scripts": {
 		"release:check": "test \"$(git branch --show-current)\" = main",
-		"release": "pnpm release:check && bumpp --git-check --yes && pnpm exec ponado-docker-image --mode prod",
-		"release:patch": "pnpm release:check && bumpp patch --git-check --yes && pnpm exec ponado-docker-image --mode prod",
-		"release:minor": "pnpm release:check && bumpp minor --git-check --yes && pnpm exec ponado-docker-image --mode prod",
-		"release:major": "pnpm release:check && bumpp major --git-check --yes && pnpm exec ponado-docker-image --mode prod"
+		"release:check-tag": "test \"$(git describe --exact-match --tags HEAD 2>/dev/null)\" = \"v$(node -pe 'require(\"./package.json\").version')\"",
+		"release:variants": "pnpm release:check && pnpm release:check-tag && pnpm exec ponado-docker-image --mode core --no-sha-tag && pnpm exec ponado-docker-image --mode typst --no-sha-tag",
+		"release": "pnpm release:check && bumpp --git-check --yes && pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
+		"release:patch": "pnpm release:check && bumpp patch --git-check --yes && pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
+		"release:minor": "pnpm release:check && bumpp minor --git-check --yes && pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
+		"release:major": "pnpm release:check && bumpp major --git-check --yes && pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
+		"build:full": "pnpm exec ponado-docker-image build --mode dev --no-push --tag full --no-floating --no-sha-tag",
+		"build:core": "pnpm exec ponado-docker-image build --mode dev --no-push --tag core --no-floating --no-sha-tag --build-arg WITH_VIPS_EXTRAS=false",
+		"build:typst": "pnpm exec ponado-docker-image build --mode dev --no-push --tag typst --no-floating --no-sha-tag --build-arg WITH_VIPS=false",
+		"build:all": "pnpm build:full && pnpm build:core && pnpm build:typst"
 	},
 	"devDependencies": {
 		"@ponado/docker-image": "^0.4.0",
@@ -16,20 +22,32 @@
 	},
 	"dockerImage": {
 		"platforms": ["linux/amd64", "linux/arm64"],
+		"targets": [
+			"git.ponado.lt/ponado/convert-server",
+			"ghcr.io/adopon/convert-server"
+		],
 		"buildArgs": {
 			"VERSION": "{version}"
 		},
 		"modes": {
 			"prod": {
-				"targets": [
-					"git.ponado.lt/ponado/typst-server",
-					"ghcr.io/adopon/typst-server"
-				],
 				"branch": "main",
 				"requireTag": true
 			},
+			"core": {
+				"buildArgs": {
+					"WITH_VIPS_EXTRAS": "false"
+				},
+				"latest": false
+			},
+			"typst": {
+				"buildArgs": {
+					"WITH_VIPS": "false"
+				},
+				"latest": false
+			},
 			"dev": {
-				"targets": ["typst-server"]
+				"targets": ["convert-server"]
 			}
 		}
 	}

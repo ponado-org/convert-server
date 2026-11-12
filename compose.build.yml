@@ -1,32 +1,44 @@
-name: typst-server
+name: convert-server
 
-# Self-hosted Typst -> PDF renderer ("Gotenberg for Typst") - local build.
+# Self-hosted conversion service - local build.
 # Builds the image from the local tree instead of pulling the published one:
 #
 #   docker compose -f compose.build.yml up -d --build
 #
-# Reachable as http://typst-server:3100 from the shared `typst` docker
-# network, or via the published port on the host (TYPST_PORT, default 3100).
+# For the typst-only image (no vips dependency graph):
+#   WITH_VIPS=false docker compose -f compose.build.yml up -d --build
+#
+# Reachable as http://convert-server:3100 from the shared `convert` docker
+# network, or via the published port on the host (CONVERT_PORT, default 3100).
 
 services:
-  typst-server:
-    image: ${TYPST_IMAGE:-typst-server:latest}
-    build: .
-    container_name: typst-server
+  convert-server:
+    image: ${CONVERT_IMAGE:-convert-server:latest}
+    build:
+      context: .
+      args:
+        # WITH_VIPS=false builds the typst-only image (no vips deps).
+        WITH_VIPS: ${WITH_VIPS:-true}
+        # vips-jxl + vips-magick add JPEG XL, BMP, ICO, PSD and TGA.
+        WITH_VIPS_EXTRAS: ${WITH_VIPS_EXTRAS:-true}
+    container_name: convert-server
     restart: unless-stopped
     ports:
-      - "${TYPST_PORT:-3100}:3100"
+      - "${CONVERT_PORT:-3100}:3100"
     environment:
-      # Parallel typst compiles. Empty -> NumCPU, <=0 -> unlimited.
-      MAX_CONCURRENCY: ${MAX_CONCURRENCY:-}
-      # Request body cap in MB (base64 shadow files + uploaded fonts).
-      MAX_BODY_MB: ${MAX_BODY_MB:-25}
+      # Parallel conversions (typst and vips backends). Empty -> NumCPU,
+      # <=0 -> unlimited.
+      CONVERT_MAX_CONCURRENCY: ${CONVERT_MAX_CONCURRENCY:-}
+      # Request body cap in MB (uploaded files + encoded shadow files).
+      CONVERT_MAX_BODY_MB: ${CONVERT_MAX_BODY_MB:-50}
+      # Office/text conversions. Leave empty to disable them.
+      CONVERT_GOTENBERG_URL: ${CONVERT_GOTENBERG_URL:-}
       TZ: ${TZ:-UTC}
     volumes:
       # Shared font pool: every .ttf/.otf in here is visible to all renders.
-      - ${TYPST_FONTS_DIR:-./fonts}:/app/fonts:ro
+      - ${CONVERT_FONTS_DIR:-./fonts}:/app/fonts:ro
     networks:
-      - typst
+      - convert
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3100/health"]
       interval: 30s
@@ -36,7 +48,12 @@ services:
 
 networks:
   # Lookup-or-create by fixed name: other compose projects join with
-  #   networks: { typst: { external: true } }
-  # Override the network name with TYPST_NETWORK to attach to an existing one.
-  typst:
-    name: ${TYPST_NETWORK:-typst}
+  #   networks: { convert: { external: true } }
+  # Override the network name with CONVERT_NETWORK to attach to an existing one.
+  convert:
+    name: ${CONVERT_NETWORK:-convert}
+  # To reach Gotenberg on another compose project's network, uncomment and
+  # add it to the service's `networks:` list:
+  # gotenberg:
+  #   name: ${CONVERT_GOTENBERG_NETWORK:-gotenberg}
+  #   external: true

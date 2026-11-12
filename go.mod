@@ -1,3 +1,3 @@
-module typst-server
+module convert-server
 
 go 1.27
