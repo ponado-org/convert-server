@@ -27,6 +27,10 @@ type Config struct {
 	// GotenbergURL enables Office/text conversions when set
 	// (CONVERT_GOTENBERG_URL, e.g. http://gotenberg:3000).
 	GotenbergURL string
+	// GotenbergProxy exposes /gotenberg/* as a reverse proxy to GotenbergURL
+	// (CONVERT_GOTENBERG_PROXY, default true). It has no effect when
+	// GotenbergURL is empty.
+	GotenbergProxy bool
 	// MaxConcurrency caps parallel conversions; <= 0 means unlimited
 	// (CONVERT_MAX_CONCURRENCY, default NumCPU).
 	MaxConcurrency int
@@ -41,6 +45,7 @@ func FromEnv() (Config, error) {
 		Port:           defaultPort,
 		TypstBin:       "typst",
 		VipsBin:        "vips",
+		GotenbergProxy: true,
 		MaxConcurrency: runtime.NumCPU(),
 		MaxBodyBytes:   defaultBodyMB << 20,
 	}
@@ -56,6 +61,14 @@ func FromEnv() (Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv("CONVERT_GOTENBERG_URL")); v != "" {
 		cfg.GotenbergURL = v
+	}
+
+	if v := strings.TrimSpace(os.Getenv("CONVERT_GOTENBERG_PROXY")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CONVERT_GOTENBERG_PROXY %q: %w", v, err)
+		}
+		cfg.GotenbergProxy = enabled
 	}
 
 	if v := strings.TrimSpace(os.Getenv("CONVERT_MAX_CONCURRENCY")); v != "" {

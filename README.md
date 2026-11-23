@@ -49,13 +49,12 @@ curl -s localhost:3100/health                       # ok
 ```
 
 `compose.yml` is the copy-pasteable, production one: it only pulls the
-published image (`CONVERT_IMAGE` overrides the registry/tag). Published to both
-the internal registry and GHCR:
+published image (`CONVERT_IMAGE` overrides the registry/tag). Published to GHCR:
 
 ```bash
 docker compose up -d
-CONVERT_IMAGE=ghcr.io/adopon/convert-server:latest docker compose up -d
-CONVERT_IMAGE=ghcr.io/adopon/convert-server:typst docker compose up -d
+CONVERT_IMAGE=ghcr.io/ponado-org/convert-server:latest docker compose up -d
+CONVERT_IMAGE=ghcr.io/ponado-org/convert-server:typst docker compose up -d
 ```
 
 `compose.build.yml` is the local-build variant used during development.
@@ -85,11 +84,11 @@ Capabilities:
   pass-through, and Office->PDF if Gotenberg is configured. Image transcoding
   returns `501`.
 
-Named modes live in `package.json` → `dockerImage.modes`, so the tag/mirror/
-platform policy stays in one place. The convenience scripts are thin wrappers:
+Named modes live in `package.json` → `dockerImage.modes`, so the tag/platform
+policy stays in one place. The convenience scripts are thin wrappers:
 
 ```bash
-pnpm install                 # once; installs @ponado/docker-image
+pnpm install                 # once; installs @ponado-org/docker-image
 
 # local builds -> convert-server:full / :core / :typst
 pnpm build:full
@@ -104,7 +103,7 @@ docker build --build-arg WITH_VIPS=false -t convert-server:typst .
 WITH_VIPS=false docker compose -f compose.build.yml up -d --build
 ```
 
-Publish a variant (multi-arch, both registries, mirrored digest):
+Publish a variant (multi-arch, GHCR):
 
 ```bash
 pnpm exec ponado-docker-image --mode core --no-sha-tag
@@ -115,19 +114,27 @@ pnpm exec ponado-docker-image --mode core --no-sha-tag --dry-run
 pnpm exec ponado-docker-image --mode typst --no-sha-tag --dry-run
 ```
 
-Releases publish variants first, then the full image last so `latest` only
-moves after every variant succeeded:
+Releases are built by GitHub Actions on `v*` tag pushes
+(`.github/workflows/docker.yml`). The workflow publishes the `core` and `typst`
+variants first, then the full image, so `latest` only moves after every variant
+succeeded.
 
 ```bash
 pnpm release:patch     # or release:minor / release:major / release
+```
 
-# variants only, from a clean HEAD tagged v<package.json version>
-pnpm release:variants
+This bumps the version, commits it, and pushes `main` plus the tag. The tag push
+starts the workflow; a manual run can target `all`, `prod`, `core` or `typst`.
+
+If Actions is unavailable, build the same images locally from the tagged HEAD:
+
+```bash
+pnpm release:images    # variants first, then prod
 ```
 
 The full `prod` build refuses a dirty tree, a non-`main` branch, or a HEAD that
-is not tagged `v<version>`. `release:variants` also checks the tag, but the mode
-itself is reusable for scratch builds with `--allow-*`.
+is not tagged `v<version>`. CI checks out the tag, so the same policy applies
+there. `pnpm release:variants` builds only the two variants.
 
 Ad-hoc tags go straight to the CLI:
 
@@ -143,8 +150,7 @@ pnpm exec ponado-docker-image --mode typst --no-sha-tag \
   --image registry.example.com/you/convert-server --no-mirror
 ```
 
-The first target is built once and the GHCR mirror is copied from it with
-`docker buildx imagetools create`, so both registries get the same digest.
+The image is built and pushed to GHCR (`ghcr.io/ponado-org/convert-server`).
 
 A missing `vips` binary is not fatal at startup: `/version` reports
 `"vips":"disabled"` and `/formats` only advertises what the running image can
@@ -161,7 +167,7 @@ Then log in (keep the token in your password manager, not in the repo):
 
 ```bash
 export CR_PAT=ghp_...
-echo "$CR_PAT" | docker login ghcr.io -u adopon --password-stdin
+echo "$CR_PAT" | docker login ghcr.io -u <github-user> --password-stdin
 ```
 
 The `gh` CLI token also works if you refresh it with the scope
@@ -194,6 +200,23 @@ Routes used:
 
 Gotenberg's own request body limits, timeouts and LibreOffice settings still
 apply. `CONVERT_MAX_BODY_MB` should be at least as large as the files you send.
+
+### Gotenberg proxy
+
+When `CONVERT_GOTENBERG_URL` is set, `/gotenberg/*` is a transparent reverse
+proxy to it. The mount prefix is stripped and the method, query, headers and
+body are forwarded unchanged:
+
+```bash
+# calls Gotenberg's POST /forms/pdf/merge
+curl -s localhost:3100/gotenberg/forms/pdf/merge \
+  -F 'files=@a.pdf' -F 'files=@b.pdf' -o merged.pdf
+```
+
+Use it for Gotenberg features that `/convert` does not wrap (merge, PDF/A,
+signing, metadata). Prefer `/convert` for image, PDF and Office conversion so
+clients stay backend-agnostic. Set `CONVERT_GOTENBERG_PROXY=false` to disable
+the route; when Gotenberg is not configured it returns `501`.
 
 ## Tests
 
@@ -238,6 +261,7 @@ internal/config/         environment parsing
 internal/typst/          typst invocation, shadow dirs, timeouts, concurrency
 internal/convert/        format detection, vips pipeline, Gotenberg client
 internal/server/         HTTP handlers + JSON/multipart request decoding
+.github/workflows/       GitHub Actions image builds (tag push + manual)
 package.json             version, dockerImage policy, release scripts
 ```
 
@@ -250,6 +274,7 @@ package.json             version, dockerImage policy, release scripts
 | GET    | `/formats`      | accepted inputs, output targets, enabled backends    |
 | POST   | `/typst/render` | `application/pdf`, or `application/json` on error    |
 | POST   | `/convert`      | converted bytes, or `application/json` on error      |
+| ANY    | `/gotenberg/*`  | transparent proxy to `CONVERT_GOTENBERG_URL` (when enabled) |
 
 ### `POST /convert`
 
@@ -407,6 +432,7 @@ shared across apps.
 | `CONVERT_TYPST_BIN` | `typst` | Typst binary (path or name on `$PATH`). |
 | `CONVERT_VIPS_BIN` | `vips` | libvips CLI (path or name on `$PATH`). Missing binary disables image conversion instead of failing startup. |
 | `CONVERT_GOTENBERG_URL` | empty | Gotenberg base URL; enables Office/HTML conversion. |
+| `CONVERT_GOTENBERG_PROXY` | `true` | Expose `/gotenberg/*` as a reverse proxy to `CONVERT_GOTENBERG_URL`. |
 | `CONVERT_MAX_CONCURRENCY` | NumCPU | Parallel conversions per backend; `<= 0` = unlimited. |
 | `CONVERT_MAX_BODY_MB` | `50` | Request body cap in MB. |
 | `CONVERT_FONTS_DIR` | `./fonts` | Host font dir mounted at `/app/fonts` (compose). |
@@ -448,6 +474,8 @@ Any HTTP client works: POST to `/convert` with a file part, or to
   the concurrency cap.
 - HTML is rendered by Gotenberg's Chromium; configure Gotenberg's allow/deny
   lists if HTML is untrusted (a page can reference remote resources).
+- `/gotenberg/*` exposes Gotenberg's whole HTTP surface. Keep the service on a
+  private network, or set `CONVERT_GOTENBERG_PROXY=false`.
 - `cache-control: no-store` and `x-content-type-options: nosniff` are set on
   binary responses.
 

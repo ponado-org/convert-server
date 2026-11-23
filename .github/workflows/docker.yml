@@ -1,0 +1,120 @@
+# Builds the convert-server images on a native arm64 GitHub runner and pushes
+# them to GHCR. A `v*` tag publishes every variant; a manual run can target a
+# single mode.
+#
+# Tag/branch/clean-tree policy, tags and platforms stay in package.json and are
+# enforced by @ponado-org/docker-image, so CI and local builds share one policy.
+#
+# Auth uses PONADO_PACKAGES_TOKEN when it is set (classic PAT with
+# read:packages, as a repository secret). Without it the job falls back to the
+# automatic GITHUB_TOKEN, which can pull the @ponado-org packages once they are
+# public. GitHub's npm registry still requires a token even for public packages,
+# so the npmrc is always written.
+
+name: Docker image
+run-name: "Docker ${{ inputs.mode || 'all' }} · ${{ github.ref_name }}"
+
+on:
+    push:
+        tags:
+            - "v*"
+    workflow_dispatch:
+        inputs:
+            mode:
+                description: Image mode
+                type: choice
+                options:
+                    - all
+                    - prod
+                    - core
+                    - typst
+                default: all
+
+permissions:
+    contents: read
+    packages: write
+
+concurrency:
+    group: docker-${{ inputs.mode || 'all' }}-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    build:
+        name: ${{ inputs.mode || 'all' }} images
+        # Native arm64. The amd64 leg runs through QEMU; the Go builder itself
+        # always runs on the build platform and cross-compiles.
+        runs-on: ubuntu-24.04-arm
+        timeout-minutes: 90
+        env:
+            MODE: ${{ inputs.mode || 'all' }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  # `git describe --exact-match` needs the release tag.
+                  fetch-depth: 0
+
+            - name: Set up pnpm
+              uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+            - name: Set up Node
+              uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 26
+                  cache: pnpm
+
+            - name: Configure npm auth for @ponado-org
+              env:
+                  PONADO_PACKAGES_TOKEN: ${{ secrets.PONADO_PACKAGES_TOKEN }}
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  if [ -n "$PONADO_PACKAGES_TOKEN" ]; then
+                    token="$PONADO_PACKAGES_TOKEN"
+                    echo "Using PONADO_PACKAGES_TOKEN for @ponado-org"
+                  else
+                    token="$GITHUB_TOKEN"
+                    echo "No PONADO_PACKAGES_TOKEN; using GITHUB_TOKEN (packages must be public)"
+                  fi
+                  umask 077
+                  {
+                    echo "@ponado-org:registry=https://npm.pkg.github.com"
+                    echo "//npm.pkg.github.com/:_authToken=${token}"
+                  } > "$HOME/.npmrc"
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Verify release tag
+              if: github.ref_type == 'tag'
+              run: pnpm release:check-tag
+
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+            - name: Log in to GHCR
+              uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            # Variants first, full image last so `latest` only moves after
+            # every variant succeeded. This mirrors the local release order.
+            - name: Build core
+              if: env.MODE == 'all' || env.MODE == 'core'
+              run: pnpm exec ponado-docker-image build --mode core --no-sha-tag --no-interactive
+
+            - name: Build typst
+              if: env.MODE == 'all' || env.MODE == 'typst'
+              run: pnpm exec ponado-docker-image build --mode typst --no-sha-tag --no-interactive
+
+            - name: Build prod
+              if: env.MODE == 'all' || env.MODE == 'prod'
+              run: pnpm exec ponado-docker-image build --mode prod --no-interactive
+
+            - name: Remove npm auth
+              if: always()
+              run: rm -f "$HOME/.npmrc"

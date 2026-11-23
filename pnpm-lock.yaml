@@ -166,17 +166,18 @@ importers:
 
   .:
     devDependencies:
-      '@ponado/docker-image':
-        specifier: ^0.4.0
-        version: 0.4.0
+      '@ponado-org/docker-image':
+        specifier: ^0.5.0
+        version: 0.5.0
       bumpp:
         specifier: ^12.3.0
         version: 12.3.0
 
 packages:
 
-  '@ponado/docker-image@0.4.0':
-    resolution: {integrity: sha512-54Os1DP/fbJy55NnHuGyeYD0e0jJUXhHOLjcj85u6VgGCTePctCMCFpVzA+UvdUos+RrCyhMv3ksuVXlxHGSrA==, tarball: https://git.ponado.lt/api/packages/ponado/npm/%40ponado%2Fdocker-image/-/0.4.0/docker-image-0.4.0.tgz}
+  '@ponado-org/docker-image@0.5.0':
+    resolution: {integrity: sha512-EHH1Z+e9OV1fOfg33f2JYOBYbuma/ODFCpN+uxOhv2j21QSRyhncQUhfpa24mW7nxF2DfCyT2SWhT16lvp2T2A==, tarball: https://npm.pkg.github.com/download/@ponado-org/docker-image/0.5.0/1cd4c09f8dab0a95fb58fc4c9521d0c3662f148b}
+    engines: {node: '>=20.0.0'}
     hasBin: true
 
   '@quansync/fs@1.1.0':
@@ -248,7 +249,7 @@ packages:
 
 snapshots:
 
-  '@ponado/docker-image@0.4.0': {}
+  '@ponado-org/docker-image@0.5.0': {}
 
   '@quansync/fs@1.1.0':
     dependencies:

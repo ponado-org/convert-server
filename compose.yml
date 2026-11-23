@@ -26,7 +26,7 @@ services:
     # Override the whole ref (registry + tag) with CONVERT_IMAGE when pulling
     # from a different registry or a pinned release. Variant tags: :core,
     # :typst, or immutable vX.Y.Z-core / vX.Y.Z-typst.
-    image: ${CONVERT_IMAGE:-git.ponado.lt/ponado/convert-server:latest}
+    image: ${CONVERT_IMAGE:-ghcr.io/ponado-org/convert-server:latest}
     container_name: convert-server
     restart: unless-stopped
     ports:
@@ -39,6 +39,8 @@ services:
       CONVERT_MAX_BODY_MB: ${CONVERT_MAX_BODY_MB:-50}
       # Office/text conversions. Leave empty to disable them.
       CONVERT_GOTENBERG_URL: ${CONVERT_GOTENBERG_URL:-}
+      # Expose /gotenberg/* as a reverse proxy to the URL above.
+      CONVERT_GOTENBERG_PROXY: ${CONVERT_GOTENBERG_PROXY:-true}
       TZ: ${TZ:-UTC}
     volumes:
       # Shared font pool: every .ttf/.otf in here is visible to all renders.

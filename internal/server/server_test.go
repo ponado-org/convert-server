@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -265,6 +267,93 @@ func TestHandleConvertErrorStatuses(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
 			}
 		})
+	}
+}
+
+func TestGotenbergProxyForwardsForms(t *testing.T) {
+	var (
+		gotMethod string
+		gotPath   string
+		gotQuery  string
+		gotBody   string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.Header().Set("content-type", "application/pdf")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("MERGED"))
+	}))
+	defer upstream.Close()
+
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(&fakeRenderer{}, &fakeConverter{}, Options{
+		MaxBodyBytes: 1 << 20,
+		GotenbergURL: target,
+	})
+	req := httptest.NewRequest(http.MethodPost,
+		"/gotenberg/forms/pdf/merge?trace=1", strings.NewReader("PDF-BYTES"))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotMethod != http.MethodPost || gotPath != "/forms/pdf/merge" || gotQuery != "trace=1" {
+		t.Fatalf("upstream got %s %s?%s", gotMethod, gotPath, gotQuery)
+	}
+	if gotBody != "PDF-BYTES" {
+		t.Fatalf("upstream body = %q", gotBody)
+	}
+	if rec.Body.String() != "MERGED" {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+	if got := rec.Header().Get("content-type"); got != "application/pdf" {
+		t.Fatalf("content-type = %q", got)
+	}
+}
+
+func TestGotenbergProxyDisabled(t *testing.T) {
+	s := newTestServer(&fakeRenderer{}, &fakeConverter{}, Options{MaxBodyBytes: 1 << 20})
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/gotenberg/forms/pdf/merge", nil))
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", rec.Code)
+	}
+}
+
+func TestGotenbergProxyRejectsOversizeBody(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(&fakeRenderer{}, &fakeConverter{}, Options{
+		MaxBodyBytes: 4,
+		GotenbergURL: target,
+	})
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec,
+		httptest.NewRequest(http.MethodPost, "/gotenberg/forms/pdf/merge", strings.NewReader("TOO-LONG")))
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", rec.Code)
+	}
+	if called {
+		t.Fatal("oversize request reached the upstream")
 	}
 }
 

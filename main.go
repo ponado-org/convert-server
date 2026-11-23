@@ -12,6 +12,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"net/url"
 
 	"convert-server/internal/config"
 	"convert-server/internal/convert"
@@ -49,8 +50,18 @@ func main() {
 	}
 	if cfg.GotenbergURL == "" {
 		log.Printf("gotenberg: disabled (set CONVERT_GOTENBERG_URL for Office conversions)")
+	} else if cfg.GotenbergProxy {
+		log.Printf("gotenberg: %s (proxy: /gotenberg)", cfg.GotenbergURL)
 	} else {
-		log.Printf("gotenberg: %s", cfg.GotenbergURL)
+		log.Printf("gotenberg: %s (proxy disabled)", cfg.GotenbergURL)
+	}
+
+	var gotenbergProxy *url.URL
+	if cfg.GotenbergURL != "" && cfg.GotenbergProxy {
+		gotenbergProxy, err = url.Parse(cfg.GotenbergURL)
+		if err != nil {
+			log.Fatalf("invalid CONVERT_GOTENBERG_URL: %v", err)
+		}
 	}
 
 	typstVersion := renderer.Version()
@@ -75,6 +86,7 @@ func main() {
 		TypstVersion:   typstVersion,
 		VipsVersion:    vipsVersion,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
+		GotenbergURL:   gotenbergProxy,
 	})
 	addr := "0.0.0.0:" + cfg.Port
 	log.Printf("%s %s listening on %s (typst: %s, vips: %s)", server.Name, version, addr, typstVersion, vipsLabel)

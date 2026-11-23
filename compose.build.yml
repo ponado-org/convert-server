@@ -33,6 +33,8 @@ services:
       CONVERT_MAX_BODY_MB: ${CONVERT_MAX_BODY_MB:-50}
       # Office/text conversions. Leave empty to disable them.
       CONVERT_GOTENBERG_URL: ${CONVERT_GOTENBERG_URL:-}
+      # Expose /gotenberg/* as a reverse proxy to the URL above.
+      CONVERT_GOTENBERG_PROXY: ${CONVERT_GOTENBERG_PROXY:-true}
       TZ: ${TZ:-UTC}
     volumes:
       # Shared font pool: every .ttf/.otf in here is visible to all renders.

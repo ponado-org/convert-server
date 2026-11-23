@@ -2,30 +2,37 @@
 	"name": "convert-server",
 	"version": "0.2.0",
 	"private": true,
+	"description": "Self-hosted conversion service for Typst, images, PDFs and Office documents",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ponado-org/convert-server.git"
+	},
+	"homepage": "https://github.com/ponado-org/convert-server",
+	"bugs": {
+		"url": "https://github.com/ponado-org/convert-server/issues"
+	},
 	"packageManager": "pnpm@12.15.0",
 	"scripts": {
-		"release:check": "test \"$(git branch --show-current)\" = main",
+		"release:check": "test \"$(git branch --show-current)\" = main && git diff --quiet && git diff --cached --quiet",
 		"release:check-tag": "test \"$(git describe --exact-match --tags HEAD 2>/dev/null)\" = \"v$(node -pe 'require(\"./package.json\").version')\"",
-		"release:variants": "pnpm release:check && pnpm release:check-tag && pnpm exec ponado-docker-image --mode core --no-sha-tag && pnpm exec ponado-docker-image --mode typst --no-sha-tag",
-		"release": "pnpm release:check && bumpp --git-check --yes && pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
-		"release:patch": "pnpm release:check && bumpp patch --git-check --yes && pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
-		"release:minor": "pnpm release:check && bumpp minor --git-check --yes && pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
-		"release:major": "pnpm release:check && bumpp major --git-check --yes && pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
+		"release:variants": "pnpm release:check-tag && pnpm exec ponado-docker-image --mode core --no-sha-tag && pnpm exec ponado-docker-image --mode typst --no-sha-tag",
+		"release:images": "pnpm release:variants && pnpm exec ponado-docker-image --mode prod",
+		"release": "pnpm release:check && bumpp --git-check --yes && git push origin main --tags",
+		"release:patch": "pnpm release:check && bumpp patch --git-check --yes && git push origin main --tags",
+		"release:minor": "pnpm release:check && bumpp minor --git-check --yes && git push origin main --tags",
+		"release:major": "pnpm release:check && bumpp major --git-check --yes && git push origin main --tags",
 		"build:full": "pnpm exec ponado-docker-image build --mode dev --no-push --tag full --no-floating --no-sha-tag",
 		"build:core": "pnpm exec ponado-docker-image build --mode dev --no-push --tag core --no-floating --no-sha-tag --build-arg WITH_VIPS_EXTRAS=false",
 		"build:typst": "pnpm exec ponado-docker-image build --mode dev --no-push --tag typst --no-floating --no-sha-tag --build-arg WITH_VIPS=false",
 		"build:all": "pnpm build:full && pnpm build:core && pnpm build:typst"
 	},
 	"devDependencies": {
-		"@ponado/docker-image": "^0.4.0",
+		"@ponado-org/docker-image": "^0.5.0",
 		"bumpp": "^12.3.0"
 	},
 	"dockerImage": {
 		"platforms": ["linux/amd64", "linux/arm64"],
-		"targets": [
-			"git.ponado.lt/ponado/convert-server",
-			"ghcr.io/adopon/convert-server"
-		],
+		"targets": ["ghcr.io/ponado-org/convert-server"],
 		"buildArgs": {
 			"VERSION": "{version}"
 		},

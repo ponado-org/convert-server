@@ -11,11 +11,14 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"runtime"
 	"strings"
 	"time"
@@ -26,6 +29,11 @@ import (
 
 // Name is the service name reported by /version and used in logs.
 const Name = "convert-server"
+
+// gotenbergPrefix mounts the transparent Gotenberg reverse proxy. It is
+// stripped before forwarding, so /gotenberg/forms/pdf/merge reaches
+// ${CONVERT_GOTENBERG_URL}/forms/pdf/merge.
+const gotenbergPrefix = "/gotenberg"
 
 // Renderer is the Typst compile backend; internal/typst satisfies it.
 type Renderer interface {
@@ -49,6 +57,8 @@ type Options struct {
 	VipsVersion  string
 	// MaxBodyBytes caps request bodies.
 	MaxBodyBytes int64
+	// GotenbergURL enables the /gotenberg reverse proxy when non-nil.
+	GotenbergURL *url.URL
 }
 
 // Server serves the wire contract for one renderer, one converter and one
@@ -60,6 +70,7 @@ type Server struct {
 	typstVersion   string
 	vipsVersion    string
 	maxBodyBytes   int64
+	gotenbergProxy *httputil.ReverseProxy
 }
 
 // New wires a server.
@@ -72,7 +83,7 @@ func New(renderer Renderer, converter Converter, opts Options) *Server {
 	if maxBody <= 0 {
 		maxBody = 25 << 20
 	}
-	return &Server{
+	s := &Server{
 		renderer:       renderer,
 		converter:      converter,
 		serviceVersion: serviceVersion,
@@ -80,6 +91,43 @@ func New(renderer Renderer, converter Converter, opts Options) *Server {
 		vipsVersion:    opts.VipsVersion,
 		maxBodyBytes:   maxBody,
 	}
+	if opts.GotenbergURL != nil {
+		s.gotenbergProxy = newGotenbergProxy(*opts.GotenbergURL, maxBody)
+	}
+	return s
+}
+
+// newGotenbergProxy forwards /gotenberg/<path> to <target>/<path> unchanged:
+// method, query, headers and body. Only the mount prefix is stripped.
+func newGotenbergProxy(target url.URL, maxBodyBytes int64) *httputil.ReverseProxy {
+	proxy := httputil.NewSingleHostReverseProxy(&target)
+	proxy.Director = nil
+	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
+		pr.Out.URL.Path = strings.TrimPrefix(pr.Out.URL.Path, gotenbergPrefix)
+		pr.Out.URL.RawPath = ""
+		pr.SetURL(&target)
+		pr.Out.Host = target.Host
+		pr.SetXForwarded()
+	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		log.Printf("gotenberg proxy %s %s -> %d", resp.Request.Method, resp.Request.URL.Path, resp.StatusCode)
+		return nil
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) || strings.Contains(err.Error(), "request body too large") {
+			apiError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("request body exceeds %dMB", maxBodyBytes>>20))
+			return
+		}
+		status := http.StatusBadGateway
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		log.Printf("gotenberg proxy %s %s failed: %v", r.Method, r.URL.Path, err)
+		apiError(w, status, "gotenberg proxy failed: "+err.Error())
+	}
+	return proxy
 }
 
 // Handler returns the routed HTTP handler.
@@ -90,7 +138,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /formats", s.handleFormats)
 	mux.HandleFunc("POST /typst/render", s.handleRender)
 	mux.HandleFunc("POST /convert", s.handleConvert)
+	mux.Handle(gotenbergPrefix+"/", s.handleGotenbergProxy())
 	return mux
+}
+
+func (s *Server) handleGotenbergProxy() http.Handler {
+	if s.gotenbergProxy == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			apiError(w, http.StatusNotImplemented, "gotenberg proxy is not configured")
+		})
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > s.maxBodyBytes {
+			apiError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("request body exceeds %dMB", s.maxBodyBytes>>20))
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, s.maxBodyBytes)
+		s.gotenbergProxy.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
